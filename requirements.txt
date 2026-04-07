@@ -1,0 +1,23 @@
+# Agent Memory System - Python Dependencies
+# MySQL 云端版
+
+# MySQL 数据库
+pymysql>=1.1.0
+DBUtils>=3.0.0
+
+# 配置
+pyyaml>=6.0
+
+# 可选: API 服务
+fastapi>=0.100.0
+uvicorn>=0.23.0
+pydantic>=2.0.0
+
+# 可选: 向量搜索 (根据 provider 选择)
+# mysql-vector  # MySQL 8.0+ 原生向量 (如需要)
+# pymilvus>=2.3.0  # Milvus (如使用 Milvus)
+# pinecone-client>=3.0.0  # Pinecone (如使用 Pinecone)
+
+# 开发
+pytest>=7.0.0
+pytest-cov>=4.0.0

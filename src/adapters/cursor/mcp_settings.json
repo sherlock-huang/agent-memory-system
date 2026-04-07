@@ -1,0 +1,21 @@
+{
+  "mcpServers": {
+    "memory-share": {
+      "command": "python",
+      "args": [
+        "${HOME}/.cursor/tools/memory_mcp.py"
+      ],
+      "env": {
+        "MEMORY_DB_TYPE": "mysql",
+        "MEMORY_MYSQL_HOST": "218.201.18.131",
+        "MEMORY_MYSQL_PORT": "8999",
+        "MEMORY_MYSQL_DATABASE": "agent_memory",
+        "MEMORY_MYSQL_USER": "root1",
+        "MEMORY_MYSQL_PASSWORD": "${MYSQL_PASSWORD}",
+        "MEMORY_SOURCE": "cursor",
+        "MEMORY_AGENT_ID": "${CURSOR_AGENT_ID:-cursor_default}"
+      },
+      "description": "Agent Memory Share - Cross-Agent Memory System"
+    }
+  }
+}

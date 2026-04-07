@@ -1,0 +1,32 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Memory CLI - Standalone Wrapper
+独立的 CLI 包装器，用于直接从命令行调用
+
+用法:
+    memory.exe <command> [args]
+    
+或:
+    python memory.exe <command> [args]
+"""
+
+import sys
+import os
+from pathlib import Path
+
+# 添加 src 到路径
+SCRIPT_DIR = Path(__file__).parent
+AGENT_MEMORY_DIR = SCRIPT_DIR.parent.parent  # agent-memory-system
+SRC_DIR = AGENT_MEMORY_DIR / "src"
+
+sys.path.insert(0, str(SRC_DIR))
+
+# 设置工作目录
+os.chdir(str(AGENT_MEMORY_DIR))
+
+# 导入并运行 CLI
+from cli.memory_cli import main
+
+if __name__ == "__main__":
+    main()
