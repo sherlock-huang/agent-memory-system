@@ -14,20 +14,19 @@
 #     export MEMORY_DB_PASSWORD="your_password"
 #     echo 'export MEMORY_DB_PASSWORD="your_password"' >> ~/.bashrc
 
-# MinIO 云端存储 ⭐
+# MinIO 云端存储
 minio:
-  endpoint: "218.201.18.133:8010"
-  access_key: "admin"
-  secret_key: "Minio12345678"
+  endpoint: "http://YOUR_SERVER_IP:8010"
+  access_key: "YOUR_ACCESS_KEY"
+  secret_key: "YOUR_SECRET_KEY"
   bucket: "openclaw"
   region: "cn-east-1"
-  # 本地缓存目录（下载的经验会缓存到这里）
   cache_dir: "./cache/experiences"
 
 # MySQL 数据库
 database:
   type: mysql
-  host: "218.201.18.133"
+  host: "YOUR_SERVER_IP"
   port: 8999
   database: "agent_memory"
   user: "root1"
@@ -44,13 +43,6 @@ database:
     connect: 10
     read: 30
     write: 30
-
-# 经验文件服务器（旧版，保留兼容）
-experience_server:
-  host: "218.201.18.131"
-  port: 8998
-  token: "agent-memory-token-2026"
-  enabled: false  # 已迁移到 MinIO，设为 false
 
 source: "cli"
 agent_id: null

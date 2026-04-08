@@ -1,9 +1,9 @@
-﻿#!/bin/bash
+#!/bin/bash
 # ============================================
-#  Agent Memory System - Linux/macOS 瀹夎鑴氭湰
+#  Agent Memory System - Linux/macOS 安装脚本
 # ============================================
 #
-# 浣跨敤鏂规硶:
+# 使用方法:
 #   1. chmod +x install.sh
 #   2. ./install.sh
 #
@@ -12,67 +12,70 @@ set -e
 
 echo ""
 echo "========================================"
-echo "  Agent Memory System 瀹夎鍚戝"
+echo "  Agent Memory System 安装向导"
 echo "========================================"
 echo ""
 
-# 妫€鏌?Python
+# 检查 Python
 if ! command -v python3 &> /dev/null; then
-    echo "[閿欒] 鏈壘鍒?Python3"
-    echo "璇峰厛瀹夎 Python 3.8+:"
+    echo "[错误] 未找到 Python3"
+    echo "请先安装 Python 3.8+:"
     echo "  Ubuntu/Debian: sudo apt install python3 python3-pip"
     echo "  macOS: brew install python3"
     exit 1
 fi
-echo "[OK] Python3 宸叉壘鍒? $(python3 --version)"
+echo "[OK] Python3 已找到: $(python3 --version)"
 
-# 妫€鏌?pip
+# 检查 pip
 if ! command -v pip3 &> /dev/null; then
-    echo "[閿欒] 鏈壘鍒?pip3"
-    echo "璇疯繍琛? sudo apt install python3-pip"
+    echo "[错误] 未找到 pip3"
+    echo "请运行: sudo apt install python3-pip"
     exit 1
 fi
-echo "[OK] pip3 宸叉壘鍒?
+echo "[OK] pip3 已找到"
 
-# 瀹夎渚濊禆
+# 安装依赖
 echo ""
-echo "[1/6] 瀹夎 Python 渚濊禆..."
+echo "[1/6] 安装 Python 依赖..."
 pip3 install pyyaml mysql-connector-python boto3 --quiet
-echo "[OK] 渚濊禆瀹夎瀹屾垚"
+echo "[OK] 依赖安装完成"
 
-# 鑾峰彇鑴氭湰鐩綍
+# 获取脚本目录
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# 妫€鏌ラ」鐩枃浠?if [ ! -f "src/cli/memory_cli.py" ]; then
-    echo "[閿欒] 鎵句笉鍒?memory_cli.py"
-    echo "璇风‘淇濇鑴氭湰鍦?agent-memory-system 鐩綍涓嬭繍琛?
+# 检查项目文件
+if [ ! -f "src/cli/memory_cli.py" ]; then
+    echo "[错误] 找不到 memory_cli.py"
+    echo "请确保此脚本在 agent-memory-system 目录下运行"
     exit 1
 fi
-echo "[OK] 椤圭洰鏂囦欢宸叉壘鍒? $SCRIPT_DIR"
+echo "[OK] 项目文件已找到: $SCRIPT_DIR"
 
-# 妫€鏌ラ厤缃枃浠?if [ ! -f "config.yaml" ]; then
+# 检查配置文件
+if [ ! -f "config.yaml" ]; then
     echo ""
-    echo "[2/6] 鍒涘缓閰嶇疆鏂囦欢..."
+    echo "[2/6] 创建配置文件..."
     cat > config.yaml << 'EOF'
 # Agent Memory System - Configuration
 
-# MinIO 浜戠瀛樺偍
+# MinIO 云端存储
 minio:
-  endpoint: "218.201.18.133:8010"
-  access_key: "admin"
-  secret_key: "Minio12345678"
+  endpoint: "http://YOUR_SERVER_IP:8010"
+  access_key: "YOUR_ACCESS_KEY"
+  secret_key: "YOUR_SECRET_KEY"
   bucket: "openclaw"
   region: "cn-east-1"
   cache_dir: "./cache/experiences"
 
-# MySQL 鏁版嵁搴?database:
+# MySQL 数据库
+database:
   type: mysql
-  host: "218.201.18.133"
+  host: "YOUR_SERVER_IP"
   port: 8999
   database: "agent_memory"
   user: "root1"
-  password: "${MEMORY_DB_PASSWORD:-lJ0^)sG0\\dI1~gN1\"lJ6|}"
+  password: "${MEMORY_DB_PASSWORD:-YOUR_DB_PASSWORD}"
   charset: "utf8mb4"
 
 source: "cli"
@@ -84,64 +87,65 @@ search:
 
 log_level: "INFO"
 EOF
-    echo "[OK] 閰嶇疆鏂囦欢宸插垱寤?
+    echo "[OK] 配置文件已创建"
 else
-    echo "[2/6] 閰嶇疆鏂囦欢宸插瓨鍦紝璺宠繃"
+    echo "[2/6] 配置文件已存在，跳过"
 fi
 
-# 鍒涘缓鐩綍
+# 创建目录
 echo ""
-echo "[3/6] 鍒涘缓鏈湴瀛樺偍鐩綍..."
+echo "[3/6] 创建本地存储目录..."
 mkdir -p experiences cache/experiences logs
-echo "[OK] 鐩綍鍒涘缓瀹屾垚"
+echo "[OK] 目录创建完成"
 
-# 娴嬭瘯 MinIO 杩炴帴
+# 测试 MinIO 连接
 echo ""
-echo "[4/6] 娴嬭瘯 MinIO 杩炴帴..."
+echo "[4/6] 测试 MinIO 连接..."
 if python3 -c "from src.core.minio_client import MinIOClient; c = MinIOClient(); c.test_connection()" 2>/dev/null; then
-    echo "[OK] MinIO 杩炴帴鎴愬姛"
+    echo "[OK] MinIO 连接成功"
 else
-    echo "[璀﹀憡] MinIO 杩炴帴澶辫触"
-    echo "璇锋鏌?"
-    echo "  1. 缃戠粶鏄惁鍙揪 218.201.18.133:8010"
-    echo "  2. 瀹夊叏缁勬槸鍚﹀紑鏀?8010 绔彛"
+    echo "[警告] MinIO 连接失败"
+    echo "请检查:"
+    echo "  1. 网络是否可达 YOUR_SERVER_IP:8010"
+    echo "  2. 安全组是否开放 8010 端口"
 fi
 
-# 娴嬭瘯鏁版嵁搴撹繛鎺?echo ""
-echo "[5/6] 娴嬭瘯鏁版嵁搴撹繛鎺?.."
+# 测试数据库连接
+echo ""
+echo "[5/6] 测试数据库连接..."
 if python3 src/cli/memory_cli.py status > /dev/null 2>&1; then
-    echo "[OK] 鏁版嵁搴撹繛鎺ユ垚鍔?
+    echo "[OK] 数据库连接成功"
 else
-    echo "[璀﹀憡] 鏁版嵁搴撹繛鎺ュけ璐?
-    echo "璇锋鏌?"
-    echo "  1. 缃戠粶鏄惁鍙揪 218.201.18.133:8999"
-    echo "  2. 鏁版嵁搴撳瘑鐮佹槸鍚︽纭?
+    echo "[警告] 数据库连接失败"
+    echo "请检查:"
+    echo "  1. 网络是否可达 YOUR_SERVER_IP:8999"
+    echo "  2. 数据库密码是否正确"
 fi
 
-# 娴嬭瘯瀛樺偍鍔熻兘
+# 测试存储功能
 echo ""
-echo "[6/6] 娴嬭瘯瀛樺偍鍔熻兘..."
-if echo "娴嬭瘯璁板繂" | python3 src/cli/memory_cli.py store "鏈湴娴嬭瘯璁板繂" --type general --tags test > /dev/null 2>&1; then
-    echo "[OK] 瀛樺偍鍔熻兘姝ｅ父"
+echo "[6/6] 测试存储功能..."
+if echo "测试记忆" | python3 src/cli/memory_cli.py store "本地测试记忆" --type general --tags test > /dev/null 2>&1; then
+    echo "[OK] 存储功能正常"
 else
-    echo "[璀﹀憡] 瀛樺偍娴嬭瘯澶辫触"
+    echo "[警告] 存储测试失败"
 fi
 
 echo ""
 echo "========================================"
-echo "  瀹夎瀹屾垚锛?
+echo "  安装完成！"
 echo "========================================"
 echo ""
-echo "甯哥敤鍛戒护:"
+echo "常用命令:"
 echo ""
-echo "  鏌ョ湅鐘舵€?       python3 src/cli/memory_cli.py status"
-echo "  瀛樺偍璁板繂:       python3 src/cli/memory_cli.py store \"鍐呭\""
-echo "  鍒嗕韩缁忛獙:       python3 src/cli/memory_cli.py exp-create --help"
-echo "  鏌ヨ浜戠:       python3 src/cli/memory_cli.py cloud-query \"鍏抽敭璇峔""
-echo "  鍒楀嚭缁忛獙:       python3 src/cli/memory_cli.py exp-list"
-echo "  MinIO 娴嬭瘯:     python3 src/core/minio_client.py test"
+echo "  查看状态:       python3 src/cli/memory_cli.py status"
+echo "  存储记忆:       python3 src/cli/memory_cli.py store \"内容\""
+echo "  分享经验:       python3 src/cli/memory_cli.py exp-create --help"
+echo "  查询云端:       python3 src/cli/memory_cli.py cloud-query \"关键词\""
+echo "  列出经验:       python3 src/cli/memory_cli.py exp-list"
+echo "  MinIO 测试:     python3 src/core/minio_client.py test"
 echo ""
-echo "璇︾粏鏂囨。: README.md"
-echo "蹇€熶笂鎵? QUICKSTART.md"
+echo "详细文档: README.md"
 echo ""
-
+echo "注意: 请编辑 config.yaml 填入正确的服务器地址和密码！"
+echo ""
