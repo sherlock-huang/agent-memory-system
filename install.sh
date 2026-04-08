@@ -19,7 +19,9 @@ echo ""
 # 检查 Python
 if ! command -v python3 &> /dev/null; then
     echo "[错误] 未找到 Python3"
-    echo "请先安装 Python 3.8+"
+    echo "请先安装 Python 3.8+:"
+    echo "  Ubuntu/Debian: sudo apt install python3 python3-pip"
+    echo "  macOS: brew install python3"
     exit 1
 fi
 echo "[OK] Python3 已找到: $(python3 --version)"
@@ -27,15 +29,15 @@ echo "[OK] Python3 已找到: $(python3 --version)"
 # 检查 pip
 if ! command -v pip3 &> /dev/null; then
     echo "[错误] 未找到 pip3"
-    echo "请运行: sudo apt install python3-pip 或 brew install python3"
+    echo "请运行: sudo apt install python3-pip"
     exit 1
 fi
 echo "[OK] pip3 已找到"
 
 # 安装依赖
 echo ""
-echo "[1/4] 安装 Python 依赖..."
-pip3 install pyyaml mysql-connector-python --quiet
+echo "[1/6] 安装 Python 依赖..."
+pip3 install pyyaml mysql-connector-python boto3 --quiet
 echo "[OK] 依赖安装完成"
 
 # 获取脚本目录
@@ -50,29 +52,30 @@ if [ ! -f "src/cli/memory_cli.py" ]; then
 fi
 echo "[OK] 项目文件已找到: $SCRIPT_DIR"
 
-# 设置数据库密码
-echo ""
-echo "[2/4] 配置数据库连接"
-echo ""
-read -p "请输入数据库密码 (直接回车使用默认密码): " DB_PASS
-
-if [ -z "$DB_PASS" ]; then
-    DB_PASS='lJ0)sG0\dI1~gN1"lJ6|'
-    echo "使用默认密码"
-fi
-
-# 更新配置文件
-echo "[3/4] 更新配置文件..."
-cat > config.yaml << EOF
+# 检查配置文件
+if [ ! -f "config.yaml" ]; then
+    echo ""
+    echo "[2/6] 创建配置文件..."
+    cat > config.yaml << 'EOF'
 # Agent Memory System - Configuration
 
+# MinIO 云端存储
+minio:
+  endpoint: "218.201.18.133:9002"
+  access_key: "admin"
+  secret_key: "Minio12345678"
+  bucket: "openclaw"
+  region: "cn-east-1"
+  cache_dir: "./cache/experiences"
+
+# MySQL 数据库
 database:
   type: mysql
-  host: "218.201.18.131"
+  host: "218.201.18.133"
   port: 8999
   database: "agent_memory"
   user: "root1"
-  password: "${DB_PASS}"
+  password: "${MEMORY_DB_PASSWORD:-lJ0^)sG0\\dI1~gN1\"lJ6|}"
   charset: "utf8mb4"
 
 source: "cli"
@@ -84,22 +87,48 @@ search:
 
 log_level: "INFO"
 EOF
+    echo "[OK] 配置文件已创建"
+else
+    echo "[2/6] 配置文件已存在，跳过"
+fi
 
-echo "[OK] 配置文件已生成"
-
-# 测试连接
+# 创建目录
 echo ""
-echo "[4/4] 测试数据库连接..."
+echo "[3/6] 创建本地存储目录..."
+mkdir -p experiences cache/experiences logs
+echo "[OK] 目录创建完成"
+
+# 测试 MinIO 连接
+echo ""
+echo "[4/6] 测试 MinIO 连接..."
+if python3 -c "from src.core.minio_client import MinIOClient; c = MinIOClient(); c.test_connection()" 2>/dev/null; then
+    echo "[OK] MinIO 连接成功"
+else
+    echo "[警告] MinIO 连接失败"
+    echo "请检查:"
+    echo "  1. 网络是否可达 218.201.18.133:9002"
+    echo "  2. 安全组是否开放 9002 端口"
+fi
+
+# 测试数据库连接
+echo ""
+echo "[5/6] 测试数据库连接..."
 if python3 src/cli/memory_cli.py status > /dev/null 2>&1; then
     echo "[OK] 数据库连接成功"
 else
-    echo ""
     echo "[警告] 数据库连接失败"
     echo "请检查:"
-    echo "  1. 密码是否正确"
-    echo "  2. 网络是否可达 218.201.18.131:8999"
-    echo ""
-    echo "配置文件已生成，可以稍后手动测试"
+    echo "  1. 网络是否可达 218.201.18.133:8999"
+    echo "  2. 数据库密码是否正确"
+fi
+
+# 测试存储功能
+echo ""
+echo "[6/6] 测试存储功能..."
+if echo "测试记忆" | python3 src/cli/memory_cli.py store "本地测试记忆" --type general --tags test > /dev/null 2>&1; then
+    echo "[OK] 存储功能正常"
+else
+    echo "[警告] 存储测试失败"
 fi
 
 echo ""
@@ -109,10 +138,13 @@ echo "========================================"
 echo ""
 echo "常用命令:"
 echo ""
-echo "  查看状态:   python3 src/cli/memory_cli.py status"
-echo "  存储记忆:   python3 src/cli/memory_cli.py store \"内容\""
-echo "  分享经验:   python3 src/cli/memory_cli.py share-experience --help"
-echo "  查询云端:   python3 src/cli/memory_cli.py cloud-query \"关键词\""
+echo "  查看状态:       python3 src/cli/memory_cli.py status"
+echo "  存储记忆:       python3 src/cli/memory_cli.py store \"内容\""
+echo "  分享经验:       python3 src/cli/memory_cli.py exp-create --help"
+echo "  查询云端:       python3 src/cli/memory_cli.py cloud-query \"关键词\""
+echo "  列出经验:       python3 src/cli/memory_cli.py exp-list"
+echo "  MinIO 测试:     python3 src/core/minio_client.py test"
 echo ""
 echo "详细文档: README.md"
+echo "快速上手: QUICKSTART.md"
 echo ""

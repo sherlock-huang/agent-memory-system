@@ -18,6 +18,7 @@ from .experience import (
     Domain,
 )
 from .file_storage import FileStorage, get_file_storage
+from .http_file_storage import HTTPFileStorage, get_http_storage
 
 __all__ = [
     # Config

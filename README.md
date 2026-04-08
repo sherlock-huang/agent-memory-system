@@ -1,66 +1,154 @@
-# Agent Memory System
+# Agent Memory System - 云端经验共享系统
 
-跨 Agent 记忆共享系统，支持 OpenClaw、Claude Code、Codex、Kimi Code、Cursor 等 AI 工具。
+跨 Agent 记忆共享系统，支持将经验上传到云端 MinIO 存储，其他 Agent 可下载学习。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## 核心功能
-
-### 1. 本地记忆（默认 private）
-AI 自动存储的日常记忆，不上传云端。
-
-### 2. 经验分享（shared/global）
-用户明确指令后才分享到云端，带完整元数据和 MD 文件。
-
-## 架构设计
+## 系统架构
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                     MySQL (元数据)                          │
-│  • code, title, summary, tags, domain                      │
-│  • author, importance, quality_score                        │
-│  • file_path (指向 MD 文件)                                  │
-├─────────────────────────────────────────────────────────────┤
-│                    文件存储 (MD 文件)                        │
-│  /experiences/2026-04/EXP-BACKEND-FASTAPI-0001.md           │
-│  • 完整的 Markdown 内容                                      │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                     云端服务器 (218.201.18.133)                  │
+│  ┌───────────────────┐    ┌─────────────────────────────────┐  │
+│  │   MinIO (S3)      │    │         MySQL                    │  │
+│  │   端口: 9002       │    │         端口: 8999               │  │
+│  │   Bucket: openclaw │    │   数据库: agent_memory           │  │
+│  │   存储 MD 文件      │    │   存储经验元数据                 │  │
+│  └───────────────────┘    └─────────────────────────────────┘  │
+│           ↑                            ↑                         │
+│           │         元数据 + 文件路径    │                         │
+│           └────────────────────────────┘                         │
+└─────────────────────────────────────────────────────────────────┘
+                              ↑
+                    Agent 请求 (S3 API + MySQL)
 ```
 
-## 快速开始
+## 快速安装
 
-### 1. 安装
+### 第一步：服务器部署（云端管理人员执行，一次性）
 
 ```bash
-# Windows
+# 连接到云服务器
+ssh root@218.201.18.133
+
+# 部署 MinIO（如果尚未部署）
+docker run -d --name minio --restart=always \
+  -p 9002:9000 -p 8080:9001 \
+  -v /data/minio:/data \
+  -e 'MINIO_ROOT_USER=admin' \
+  -e 'MINIO_ROOT_PASSWORD=Minio12345678' \
+  minio/minio:latest server /data --console-address ':9001'
+
+# 创建 bucket
+docker run --rm --network host -v /tmp:/tmp minio/mc \
+  sh -c 'mc alias set myminio http://127.0.0.1:9002 admin Minio12345678 && mc mb myminio/openclaw'
+```
+
+### 第二步：客户端安装（每台 OpenClaw 机器执行）
+
+```bash
+# 克隆项目
+git clone <仓库地址> agent-memory-system
+cd agent-memory-system
+
+# Windows 安装
 install.bat
 
-# Linux/macOS
+# Linux/macOS 安装
 chmod +x install.sh && ./install.sh
 ```
 
-### 2. 基本使用
+### 第三步：配置
+
+编辑 `config.yaml`：
+
+```yaml
+# MinIO 云端存储
+minio:
+  endpoint: "218.201.18.133:9002"
+  access_key: "admin"
+  secret_key: "Minio12345678"
+  bucket: "openclaw"
+  region: "cn-east-1"
+
+# MySQL 数据库
+database:
+  type: mysql
+  host: "218.201.18.133"
+  port: 8999
+  database: "agent_memory"
+  user: "root1"
+  password: "你的密码"
+  charset: "utf8mb4"
+
+source: "cli"
+agent_id: null
+
+search:
+  default_limit: 10
+  max_limit: 100
+
+log_level: "INFO"
+```
+
+### 第四步：初始化数据库
 
 ```bash
-# 查看状态
+# 创建数据库表
+mysql -h 218.201.18.133 -P 8999 -u root1 -p agent_memory < scripts/init_mysql.sql
+mysql -h 218.201.18.133 -P 8999 -u root1 -p agent_memory < scripts/init_experiences.sql
+```
+
+## 使用方法
+
+### 查看状态
+```bash
 python src/cli/memory_cli.py status
+```
 
-# 存储记忆（默认 private，不上传）
+### 存储本地记忆（不上传）
+```bash
 python src/cli/memory_cli.py store "这是一个本地记忆" --type general
+```
 
-# 分享经验到云端（用户触发）
+### 分享经验到云端（用户触发）
+```bash
 python src/cli/memory_cli.py exp-create \
-    --title "FastAPI性能优化最佳实践" \
-    --summary "uvicorn workers=4 性能最佳" \
-    --tags fastapi,performance \
-    --domain BACKEND \
+    --title "MinIO部署最佳实践" \
+    --summary "S3兼容存储，Agent友好" \
+    --tags minio,storage,s3 \
+    --domain DEVOPS \
     --importance 8 \
-    --content "# FastAPI性能优化\n\n..."
+    --content "# MinIO部署经验
 
-# 查询云端经验
-python src/cli/memory_cli.py cloud-query "FastAPI性能"
+## 环境
+CentOS 7, Docker
 
-# 列出所有经验
+## 步骤
+1. 部署 MinIO 容器
+2. 配置 Nginx 反向代理
+3. 创建 bucket
+
+## 注意事项
+端口需在安全组开放"
+```
+
+### 查询云端经验
+```bash
+python src/cli/memory_cli.py cloud-query "MinIO部署"
+```
+
+### 下载并学习经验
+```bash
+# 获取经验详情（包含文件路径）
+python src/cli/memory_cli.py exp-get EXP-DEVOPS-MINIO-0001
+
+# 下载 MD 文件到本地
+python src/cli/memory_cli.py exp-download EXP-DEVOPS-MINIO-0001 --output ./learned/
+```
+
+### 列出所有云端经验
+```bash
 python src/cli/memory_cli.py exp-list
 ```
 
@@ -71,8 +159,8 @@ python src/cli/memory_cli.py exp-list
 | 部分 | 说明 | 示例 |
 |------|------|------|
 | `EXP` | 固定前缀 | EXP |
-| `{DOMAIN}` | 领域 | BACKEND / AI / DEVOPS |
-| `{TAG}` | 主要标签 | FASTAPI / DOCKER |
+| `{DOMAIN}` | 领域 | BACKEND / DEVOPS / AI |
+| `{TAG}` | 主要标签 | MINIO / DOCKER / FASTAPI |
 | `{SEQ:4}` | 序号 | 0001 |
 
 ### 领域代码
@@ -83,60 +171,102 @@ python src/cli/memory_cli.py exp-list
 | `FRONTEND` | 前端 |
 | `DEVOPS` | 运维 |
 | `AI` | 人工智能 |
-| `SECURITY` | 安全 |
 | `DATABASE` | 数据库 |
 | `GENERAL` | 通用 |
-
-### 示例
-
-```
-EXP-BACKEND-FASTAPI-0001
-EXP-DEVOPS-DOCKER-0001
-EXP-AI-LangChain-0001
-```
 
 ## OpenClaw 触发词
 
 | 用户输入 | OpenClaw 动作 |
 |---------|--------------|
 | `记住xxx` | 存储到本地记忆 |
-| `分享经验` | 分享经验到云端 |
+| `分享经验` | 分享经验到云端（MinIO + MySQL） |
 | `谁有xxx经验` | 查询云端经验 |
-| `查一下云端` | 列出共享经验 |
+| `借鉴云端经验` | 下载并学习云端经验 |
 
 ## 项目结构
 
 ```
 agent-memory-system/
 ├── src/
-│   ├── core/
-│   │   ├── config.py          # 配置管理
-│   │   ├── models.py          # Memory 模型
-│   │   ├── experience.py       # Experience 模型
-│   │   ├── file_storage.py     # 文件存储
-│   │   ├── database.py         # 数据库入口
-│   │   ├── store.py            # 存储引擎
-│   │   └── search.py           # 搜索引擎
+│   ├── core/                 # 核心模块
+│   │   ├── config.py         # 配置管理
+│   │   ├── models.py         # 数据模型
+│   │   ├── database.py        # MySQL 连接
+│   │   ├── minio_client.py   # MinIO 客户端 ⭐
+│   │   ├── file_storage.py   # 文件存储
+│   │   └── search.py          # 搜索
 │   ├── cli/
-│   │   ├── memory_cli.py       # CLI 主程序
-│   │   └── experience_cli.py   # 经验管理
-│   └── adapters/              # 各 Agent 适配器
+│   │   └── memory_cli.py     # CLI 主程序
+│   └── adapters/             # Agent 适配器
+│       └── openclaw/         # OpenClaw 专用
 ├── scripts/
-│   ├── init_mysql.sql         # MySQL 初始化
-│   └── init_experiences.sql    # 经验表
-├── install.bat / install.sh    # 安装脚本
-├── config.yaml               # 配置文件
+│   ├── init_mysql.sql        # MySQL 初始化
+│   └── init_experiences.sql  # 经验表
+├── skills/
+│   └── minio-storage/        # MinIO Skill ⭐
+├── config.yaml.example       # 配置示例
+├── install.bat / install.sh   # 安装脚本
 └── README.md
 ```
 
-## 数据库
+## 云端服务信息
 
-- **memories**: 本地记忆
-- **experiences**: 经验（带 MD 文件索引）
+### MinIO (S3 兼容存储)
+| 配置项 | 值 |
+|--------|-----|
+| **API 地址** | `http://218.201.18.133:9002` |
+| **Console** | `http://218.201.18.133:8080` |
+| **Bucket** | `openclaw` |
+| **Access Key** | `admin` |
+| **Secret Key** | `Minio12345678` |
 
-## 设计原则
+### MySQL (元数据)
+| 配置项 | 值 |
+|--------|-----|
+| **地址** | `218.201.18.133:8999` |
+| **数据库** | `agent_memory` |
+| **用户名** | `root1` |
 
-1. **隐私优先**：默认 private，不自动上传
-2. **用户控制**：经验分享必须用户明确触发
-3. **结构化**：带完整元数据和代码，方便搜索
-4. **文件存储**：MD 原生格式，Agent 容易理解
+## 文件命名规范
+
+### 云端经验文件
+```
+experiences/
+├── 2026-04/
+│   ├── EXP-DEVOPS-MINIO-0001.md
+│   ├── EXP-BACKEND-FASTAPI-0001.md
+│   └── ...
+```
+
+### MD 文件格式
+```markdown
+# 经验标题
+
+## 摘要
+一句话概括
+
+## 标签
+#tag1 #tag2
+
+## 正文
+详细经验内容...
+
+## 元数据
+*代码: EXP-DEVOPS-MINIO-0001*
+*领域: DEVOPS*
+*重要性: 8/10*
+```
+
+## 常见问题
+
+### Q: MinIO 连接失败
+A: 检查端口 9002 是否在安全组开放
+
+### Q: Console 打不开
+A: 检查端口 8080 是否在安全组开放，或访问 http://218.201.18.133:8080
+
+### Q: 上传失败
+A: 确认 MinIO bucket `openclaw` 已创建，权限正确
+
+### Q: 数据库连接失败
+A: 检查 MySQL 端口 8999 是否开放，密码是否正确
