@@ -1,71 +1,108 @@
 # Agent Memory System
 
-跨 Agent 经验共享系统，支持将经验上传到云端 MySQL 存储，其他 Agent 可下载学习。
+跨 Agent 记忆系统实战项目，用来沉淀经验、共享经验，并让不同 Agent 或工作流复用已有知识。
+
+它适合这几类场景：
+
+- 把一次解决过的问题沉淀成可复用经验
+- 让多个 Agent 共享经验，而不是每次都从零开始
+- 同时支持“共享经验库”和“本地私有记忆”两层能力
+- 给后续的 Agent workflow、长期记忆、团队协作提供基础设施
+
+## 核心能力
+
+- 经验共享：把结构化经验写入云端 MySQL，供其他 Agent 查询和学习
+- 本地记忆：支持本地 Agent 保存自己的偏好、上下文和工作记忆
+- 双层存储：区分共享经验与私有记忆，避免混用
+- Python SDK：可直接在 Python 项目里接入
+- CLI 工具：支持命令行分享、搜索、获取、存储
+- OpenClaw 适配：可作为 OpenClaw / Agent workflow 的记忆能力底座
+
+## 适合解决什么问题
+
+没有共享记忆时，常见问题是：
+
+- 同类问题被多个 Agent 重复解决
+- 经验只停留在聊天记录里，无法检索
+- 一个 Agent 学到的东西，另一个 Agent 无法复用
+- 本地偏好、共享经验、项目知识混在一起，边界不清
+
+这个项目的思路是把问题拆成两层：
+
+- 共享层：
+  可复用、可引用、可搜索的经验
+- 本地层：
+  当前 Agent 的偏好、上下文、临时记忆
 
 ## 系统架构
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                     云端服务器                                    │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │                     MySQL                                │    │
-│  │         端口: YOUR_MYSQL_PORT (默认 3306)                │    │
-│  │         数据库: agent_memory                            │    │
-│  │         - experiences 表（经验元数据 + MD内容）         │    │
-│  │         - memories 表（Agent 本地记忆）                 │    │
-│  └─────────────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────────┘
-                              ↑
-                    Agent 请求 (PyMySQL)
+```text
++--------------------------------------------------------------+
+|                         Cloud MySQL                          |
+|--------------------------------------------------------------|
+| experiences                                                  |
+| - shared experience metadata                                 |
+| - markdown content                                           |
+| - tags / domain / importance / author                        |
+|                                                              |
+| memories                                                     |
+| - local or scoped memory                                     |
+| - source agent                                               |
+| - type / visibility / tags                                   |
++--------------------------------------------------------------+
+                 ^                             ^
+                 |                             |
+        share / search API             local memory read/write
+                 |                             |
+         +-------+-----------------------------+-------+
+         |                                             |
+         |        Agent Memory Client / CLI / SDK      |
+         |                                             |
+         +---------------------------------------------+
 ```
 
-## 快速安装
+## 快速开始
 
-### 第一步：服务器部署（云端管理人员执行，一次性）
+### 1. 克隆项目
 
 ```bash
-# 连接到云服务器
-ssh root@YOUR_SERVER_IP
+git clone https://github.com/sherlock-huang/agent-memory-system.git
+cd agent-memory-system
+```
 
-# 安装 MySQL 8.0+
-# Ubuntu:
-apt update && apt install mysql-server
-mysql_secure_installation
+### 2. 安装依赖
 
-# CentOS:
-yum install mysql-server
-systemctl start mysqld
-mysql_secure_installation
+Windows:
 
-# 创建数据库和用户
-mysql -u root -p <<EOF
+```powershell
+install.bat
+```
+
+Linux / macOS:
+
+```bash
+chmod +x install.sh
+./install.sh
+```
+
+### 3. 准备 MySQL
+
+确保你有一个可用的 MySQL 8.0+ 实例，然后创建数据库和用户：
+
+```sql
 CREATE DATABASE agent_memory CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE USER 'memory_user'@'%' IDENTIFIED BY 'YOUR_STRONG_PASSWORD';
 GRANT ALL PRIVILEGES ON agent_memory.* TO 'memory_user'@'%';
 FLUSH PRIVILEGES;
-EOF
 ```
 
-### 第二步：客户端安装
+### 4. 配置数据库连接
 
-```bash
-# 克隆项目
-git clone https://github.com/sherlock-huang/agent-memory-system.git
-cd agent-memory-system
+推荐使用环境变量，而不是把密码直接写进配置文件。
 
-# Windows 安装
-install.bat
-
-# Linux/macOS 安装
-chmod +x install.sh && ./install.sh
-```
-
-### 第三步：配置数据库连接
-
-**方式一：环境变量（推荐，最安全）**
+PowerShell:
 
 ```powershell
-# PowerShell
 $env:MEMORY_DB_HOST = "YOUR_MYSQL_HOST"
 $env:MEMORY_DB_PORT = "3306"
 $env:MEMORY_DB_DATABASE = "agent_memory"
@@ -73,8 +110,9 @@ $env:MEMORY_DB_USER = "memory_user"
 $env:MEMORY_DB_PASSWORD = "YOUR_PASSWORD"
 ```
 
+Linux / macOS:
+
 ```bash
-# Linux/macOS
 export MEMORY_DB_HOST="YOUR_MYSQL_HOST"
 export MEMORY_DB_PORT="3306"
 export MEMORY_DB_DATABASE="agent_memory"
@@ -82,221 +120,233 @@ export MEMORY_DB_USER="memory_user"
 export MEMORY_DB_PASSWORD="YOUR_PASSWORD"
 ```
 
-**方式二：配置文件（不推荐，敏感信息会明文存储）**
-
-复制并编辑 `config.yaml.example` 为 `config.yaml`：
-
-```yaml
-database:
-  host: "YOUR_MYSQL_HOST"
-  port: 3306
-  database: "agent_memory"
-  user: "memory_user"
-  password: "YOUR_PASSWORD"  # 不推荐！
-```
-
-### 第四步：初始化数据库
+### 5. 初始化数据库
 
 ```bash
-# 执行初始化脚本
 mysql -h YOUR_MYSQL_HOST -P 3306 -u memory_user -p agent_memory < scripts/init_mysql.sql
 ```
 
-## 使用方法
+## 使用方式
 
 ### Python SDK
 
 ```python
 from skills.agent-memory.scripts import ExperienceClient, MemoryClient
 
-# 初始化客户端（自动从环境变量读取配置）
 exp_client = ExperienceClient()
 
-# 分享经验到云端
 result = exp_client.share_experience(
-    title="FastAPI性能优化最佳实践",
-    summary="uvicorn workers=4 性能最佳",
-    content="# FastAPI性能优化\n\n## workers配置\n...",
+    title="FastAPI 性能优化最佳实践",
+    summary="uvicorn workers=4 在当前场景表现更稳定",
+    content="# FastAPI 性能优化\n\n## workers 配置\n...",
     tags=["fastapi", "performance"],
     domain="BACKEND",
     importance=8.0
 )
-print(f"经验代码: {result['code']}")
 
-# 搜索云端经验
+print(result["code"])
+
 results = exp_client.search_experiences("fastapi 性能")
-for exp in results:
-    print(f"[{exp['code']}] {exp['title']}")
+for item in results:
+    print(item["code"], item["title"])
 
-# 获取经验详情（包含完整MD内容）
-exp = exp_client.get_experience("EXP-BACKEND-FASTAPI-0001")
-print(exp['content'])
-
-# 存储本地记忆（不上传）
 mem_client = MemoryClient()
 mem_client.store_memory(
-    content="用户喜欢在下午处理复杂问题",
+    content="用户偏好在下午处理复杂问题",
     memory_type="preference",
     tags=["user", "habit"]
 )
 ```
 
-### CLI 命令
+### CLI
+
+分享经验：
 
 ```bash
-# 分享经验
 python -m skills.agent-memory.scripts.client share \
-    --title "FastAPI性能优化" \
-    --summary "uvicorn workers=4" \
-    --content "# FastAPI性能优化..." \
-    --tags fastapi,performance \
-    --domain BACKEND
+  --title "FastAPI 性能优化" \
+  --summary "uvicorn workers=4" \
+  --content "# FastAPI 性能优化..." \
+  --tags fastapi,performance \
+  --domain BACKEND
+```
 
-# 搜索经验
+搜索经验：
+
+```bash
 python -m skills.agent-memory.scripts.client search "fastapi"
+```
 
-# 列出所有经验
+列出经验：
+
+```bash
 python -m skills.agent-memory.scripts.client list
+```
 
-# 获取经验详情
+获取详情：
+
+```bash
 python -m skills.agent-memory.scripts.client get EXP-BACKEND-FASTAPI-0001
+```
 
-# 存储记忆
+存储本地记忆：
+
+```bash
 python -m skills.agent-memory.scripts.client store "记忆内容" --type preference
 ```
 
-## 经验代码规则
+## 数据模型
 
-每个经验有唯一代码，格式：`EXP-{DOMAIN}-{TAG}-{SEQ:4}`
+### experiences
 
-| 部分 | 说明 | 示例 |
-|------|------|------|
-| `EXP` | 固定前缀 | EXP |
-| `{DOMAIN}` | 领域 | BACKEND / DEVOPS / AI |
-| `{TAG}` | 主要标签 | FASTAPI / DOCKER / LangChain |
-| `{SEQ:4}` | 序号 | 0001 |
+共享经验库，适合沉淀“可复用的方法和经验”。
 
-### 领域代码
+关键字段：
 
-| 代码 | 领域 |
-|------|------|
-| `BACKEND` | 后端 |
-| `FRONTEND` | 前端 |
-| `DEVOPS` | 运维 |
-| `AI` | 人工智能 |
-| `DATABASE` | 数据库 |
-| `GENERAL` | 通用 |
+- `code`：唯一经验代码，例如 `EXP-BACKEND-FASTAPI-0001`
+- `title`：经验标题
+- `summary`：一句话摘要
+- `content`：Markdown 正文
+- `domain`：经验领域
+- `tags`：标签列表
+- `author_id`：作者标识
+- `importance`：重要性评分
 
-## OpenClaw 触发词
+### memories
 
-| 用户输入 | OpenClaw 动作 |
-|---------|--------------|
-| `记住xxx` | 存储到本地记忆 |
-| `分享经验` | 分享经验到云端 |
-| `谁有xxx经验` | 查询云端经验 |
-| `借鉴云端经验` | 下载并学习云端经验 |
+本地或作用域记忆，适合存 Agent 自己的上下文和偏好。
+
+关键字段：
+
+- `content`：记忆正文
+- `summary`：摘要
+- `md_content`：Markdown 正文
+- `type`：记忆类型
+- `visibility`：可见范围，支持 `private` / `shared` / `global`
+- `source_agent`：来源 Agent
+- `tags`：标签
+
+## 经验编码规则
+
+格式：
+
+```text
+EXP-{DOMAIN}-{TAG}-{SEQ:4}
+```
+
+示例：
+
+```text
+EXP-BACKEND-FASTAPI-0001
+```
+
+常用领域代码：
+
+- `BACKEND`
+- `FRONTEND`
+- `DEVOPS`
+- `AI`
+- `DATABASE`
+- `GENERAL`
+
+## OpenClaw / Agent Workflow 触发思路
+
+这个项目可以作为更大系统里的记忆能力模块。
+
+例如：
+
+- `记住 xxx`
+  写入本地记忆
+- `分享经验`
+  写入共享经验库
+- `谁有 xxx 经验`
+  查询共享经验
+- `借鉴云端经验`
+  拉取共享经验用于当前任务
 
 ## 项目结构
 
-```
+```text
 agent-memory-system/
 ├── scripts/
-│   ├── init_mysql.sql          # MySQL 初始化脚本
-│   └── init_experiences.sql    # 经验表（已合并到init_mysql.sql）
+│   └── init_mysql.sql
 ├── skills/
 │   └── agent-memory/
-│       ├── SKILL.md            # 技能说明
+│       ├── SKILL.md
 │       └── scripts/
 │           ├── __init__.py
-│           ├── config.py       # 配置管理
-│           └── client.py       # Python 客户端
+│           ├── config.py
+│           └── client.py
 ├── src/
-│   ├── core/                   # 核心模块（保留）
-│   └── cli/                    # CLI（保留）
-├── config.yaml.example         # 配置示例
-├── install.bat / install.sh    # 安装脚本
+│   ├── core/
+│   └── cli/
+├── config.yaml.example
+├── install.bat
+├── install.sh
 └── README.md
 ```
 
-## 数据库表结构
+## 安全建议
 
-### experiences 表（核心）
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `id` | VARCHAR(50) | 内部ID (mem_xxx) |
-| `code` | VARCHAR(50) | 唯一代码 (EXP-BACKEND-FASTAPI-0001) |
-| `title` | VARCHAR(200) | 经验标题 |
-| `summary` | VARCHAR(500) | 一句话摘要 |
-| **`content`** | **MEDIUMTEXT** | **MD格式正文（核心内容）** |
-| `domain` | VARCHAR(50) | 领域 |
-| `tags` | JSON | 标签列表 |
-| `author_id` | VARCHAR(100) | 作者ID |
-| `importance` | DECIMAL(3,1) | 重要性 1-10 |
-| `created_at` | BIGINT | 创建时间戳 |
-
-### memories 表
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `id` | VARCHAR(50) | 记忆ID |
-| `content` | TEXT | 记忆内容 |
-| `summary` | VARCHAR(500) | 摘要 |
-| `md_content` | MEDIUMTEXT | MD格式正文 |
-| `type` | ENUM | 类型 |
-| `visibility` | ENUM | 可见性 (private/shared/global) |
-| `source_agent` | VARCHAR(100) | 来源Agent |
-| `tags` | JSON | 标签 |
-| `created_at` | BIGINT | 创建时间戳 |
-
-## 安全注意事项
-
-1. **数据库密码不要写在配置文件中**，使用环境变量
-2. MySQL 用户权限最小化，只授权 `agent_memory` 数据库
-3. 生产环境建议启用 SSL/TLS 加密连接
-4. 定期更新数据库密码
+- 不要把数据库密码直接写进仓库
+- 尽量通过环境变量提供连接信息
+- 生产环境建议启用 SSL/TLS
+- MySQL 账户权限最小化，只授予 `agent_memory` 所需权限
+- 定期轮换数据库密码
 
 ## 常见问题
 
-### Q: 数据库连接失败
-A: 检查：
-- MySQL 服务是否运行
-- 端口是否正确（默认 3306）
-- 用户名密码是否正确
-- 防火墙是否放行
+### 数据库连接失败
 
-### Q: PyMySQL 未安装
-A: 运行：`pip install pymysql`
+优先检查：
 
-### Q: 如何查看已分享的经验？
-A: 使用 `list_experiences()` 方法或 CLI 的 `list` 命令
+- MySQL 服务是否启动
+- 端口是否正确
+- 账号和密码是否正确
+- 防火墙或安全组是否放行
 
-### Q: 如何删除经验？
-A: 使用 `delete_experience(code)` 方法，默认软删除（改为 archived 状态）
+### PyMySQL 未安装
+
+```bash
+pip install pymysql
+```
+
+### 如何查看已分享经验
+
+使用：
+
+- `list_experiences()`
+- 或 CLI 的 `list`
+
+### 如何删除经验
+
+使用 `delete_experience(code)`。
+
+默认建议做软删除，而不是直接物理删除。
 
 ## 环境变量参考
 
 | 变量名 | 说明 | 默认值 |
-|--------|------|--------|
-| `MEMORY_DB_HOST` | 数据库地址 | localhost |
-| `MEMORY_DB_PORT` | 端口 | 3306 |
-| `MEMORY_DB_DATABASE` | 数据库名 | agent_memory |
+|---|---|---|
+| `MEMORY_DB_HOST` | 数据库地址 | `localhost` |
+| `MEMORY_DB_PORT` | 端口 | `3306` |
+| `MEMORY_DB_DATABASE` | 数据库名 | `agent_memory` |
 | `MEMORY_DB_USER` | 用户名 | - |
 | `MEMORY_DB_PASSWORD` | 密码 | - |
-| `MEMORY_DB_CHARSET` | 字符集 | utf8mb4 |
+| `MEMORY_DB_CHARSET` | 字符集 | `utf8mb4` |
 
 ## 贡献与反馈
 
 欢迎分享、引用与改进。
 
-- 发现问题：欢迎提交 Issue
-- 有改进建议：欢迎提交 Pull Request
+- 发现问题：欢迎提交 [Issue](https://github.com/sherlock-huang/agent-memory-system/issues)
+- 有改进建议：欢迎提交 [Pull Request](https://github.com/sherlock-huang/agent-memory-system/pulls)
 
-## 项目作者与维护
+## 作者与维护
 
-- 作者 / 维护者：Sherlock Huang
+- 作者：Sherlock Huang
 - 项目仓库：https://github.com/sherlock-huang/agent-memory-system
-- 项目定位：跨 Agent 记忆系统实战项目，用于经验沉淀、共享与复用
+- 项目定位：跨 Agent 记忆系统实战项目
 
 ## License
 
