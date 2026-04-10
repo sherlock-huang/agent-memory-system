@@ -342,11 +342,15 @@ pip install pymysql
 - 发现问题：欢迎提交 [Issue](https://github.com/sherlock-huang/agent-memory-system/issues)
 - 有改进建议：欢迎提交 [Pull Request](https://github.com/sherlock-huang/agent-memory-system/pulls)
 
-## 作者与维护
+## 相关链接
 
-- 作者：Sherlock Huang
-- 项目仓库：https://github.com/sherlock-huang/agent-memory-system
-- 项目定位：跨 Agent 记忆系统实战项目
+- 主站博客：https://kunpeng-ai.com
+- GitHub 组织：https://github.com/kunpeng-ai-research
+- OpenClaw 官方：https://openclaw.ai
+
+## 维护与署名
+
+- 维护者：鲲鹏AI探索局
 
 ## License
 
