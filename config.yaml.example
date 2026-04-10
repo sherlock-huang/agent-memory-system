@@ -1,54 +1,71 @@
-# Agent Memory System - Configuration
-# ===============================
+# ============================================
+# Agent Memory System - Configuration Example
+# ============================================
 #
-# 敏感信息通过环境变量配置:
-#   - MEMORY_DB_PASSWORD: 数据库密码 (必需)
-#   - MINIO_SECRET_KEY: MinIO 密码 (可选，有默认值)
+# ⚠️ 注意：敏感信息不要写在这里！
+# 
+# 配置优先级（从高到低）：
+# 1. 环境变量 (最高)
+# 2. 配置文件
+# 3. 默认值
 #
-# 设置环境变量示例:
-#   Windows PowerShell: 
+# 环境变量设置方式：
+#   PowerShell:
+#     $env:MEMORY_DB_HOST = "your-mysql-host.com"
 #     $env:MEMORY_DB_PASSWORD = "your_password"
-#     [Environment]::SetEnvironmentVariable("MEMORY_DB_PASSWORD", "your_password", "User")
 #   
 #   Linux/macOS:
+#     export MEMORY_DB_HOST="your-mysql-host.com"
 #     export MEMORY_DB_PASSWORD="your_password"
-#     echo 'export MEMORY_DB_PASSWORD="your_password"' >> ~/.bashrc
+#
+# ============================================
 
-# MinIO 云端存储
-minio:
-  endpoint: "http://YOUR_SERVER_IP:8010"
-  access_key: "YOUR_ACCESS_KEY"
-  secret_key: "YOUR_SECRET_KEY"
-  bucket: "openclaw"
-  region: "cn-east-1"
-  cache_dir: "./cache/experiences"
-
-# MySQL 数据库
+# 数据库配置（MySQL）
+# 使用 ${ENV_VAR} 格式引用环境变量，支持默认值 ${ENV_VAR:-default}
 database:
-  type: mysql
-  host: "YOUR_SERVER_IP"
-  port: 8999
-  database: "agent_memory"
-  user: "root1"
+  host: "${MEMORY_DB_HOST:-localhost}"
+  port: "${MEMORY_DB_PORT:-3306}"
+  database: "${MEMORY_DB_DATABASE:-agent_memory}"
+  user: "${MEMORY_DB_USER}"
   password: "${MEMORY_DB_PASSWORD}"
   charset: "utf8mb4"
-  
-  pool:
-    min_size: 5
-    max_size: 20
-    max_idle_time: 300
-    pool_recycle: 3600
-  
-  timeout:
-    connect: 10
-    read: 30
-    write: 30
 
-source: "cli"
-agent_id: null
+# 连接池配置（可选）
+pool:
+  min_size: 5
+  max_size: 20
+  max_idle_time: 300
+  pool_recycle: 3600
 
+# 超时配置（秒）
+timeout:
+  connect: 10
+  read: 30
+  write: 30
+
+# Agent 配置
+agent:
+  # Agent ID，不设置则自动生成
+  id: null
+  # Agent 显示名称
+  name: "昆仑"
+  # Agent 类型
+  type: "openclaw"
+
+# 搜索配置
 search:
   default_limit: 10
   max_limit: 100
+  min_score: 0.3
 
+# 日志配置
 log_level: "INFO"
+
+# 经验配置
+experience:
+  # 默认可见性：private / shared / global
+  default_visibility: "shared"
+  # 默认重要性
+  default_importance: 5.0
+  # 默认难度
+  default_level: "intermediate"

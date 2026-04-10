@@ -1,9 +1,9 @@
 -- ============================================
--- Agent Memory System - MySQL 5.7/8.0 通用 Schema
--- 兼容 MySQL 5.7 及以上版本
+-- Agent Memory System - MySQL 单一存储方案
+-- 只使用 MySQL 存储经验和记忆
 -- ============================================
 -- MySQL 连接示例:
---   mysql -h 218.201.18.131 -P 8999 -u root1 -p
+--   mysql -h YOUR_HOST -P YOUR_PORT -u YOUR_USER -p
 -- ============================================
 
 -- 创建数据库
@@ -14,65 +14,145 @@ CREATE DATABASE IF NOT EXISTS agent_memory
 USE agent_memory;
 
 -- ============================================
--- 1. 共享记忆表
+-- 1. 经验表 (experiences)
+-- 云端共享的经验，带 MD 格式内容
 -- ============================================
--- 注意: MySQL 5.7 不支持原生 JSON，我们用 VARCHAR 存储 JSON 字符串
--- 注意: MySQL 5.7 的 FULLTEXT 只支持 InnoDB/MyISAM，在 VARCHAR/TEXT 上有限制
+
+DROP TABLE IF EXISTS experiences;
+CREATE TABLE experiences (
+    -- 唯一标识
+    id VARCHAR(50) PRIMARY KEY COMMENT '内部ID (mem_xxx)',
+    code VARCHAR(50) UNIQUE COMMENT '可读标识 EXP-DOMAIN-TAG-SEQ',
+    
+    -- 核心内容
+    title VARCHAR(200) NOT NULL COMMENT '经验标题',
+    summary VARCHAR(500) COMMENT '一句话摘要',
+    importance DECIMAL(3,1) DEFAULT 5.0 COMMENT '重要性 1-10',
+    level VARCHAR(20) DEFAULT 'intermediate' COMMENT '难度：beginner/intermediate/advanced',
+    
+    -- MD 格式正文（核心内容字段）
+    content MEDIUMTEXT NOT NULL COMMENT 'MD格式正文，存储完整经验内容',
+    
+    -- 文件信息（可选，用于本地文件备份）
+    file_path VARCHAR(500) COMMENT '本地MD文件路径',
+    file_hash VARCHAR(64) COMMENT 'SHA256校验',
+    
+    -- 作者
+    author_id VARCHAR(100) NOT NULL COMMENT '作者Agent ID',
+    author_name VARCHAR(100) COMMENT '作者显示名',
+    author_type VARCHAR(20) DEFAULT 'openclaw' COMMENT '来源类型',
+    
+    -- 分类
+    domain VARCHAR(50) DEFAULT 'GENERAL' COMMENT '领域：BACKEND/FRONTEND/DEVOPS/AI/DATABASE/GENERAL',
+    tags JSON COMMENT '标签列表 ["fastapi","performance"]',
+    type VARCHAR(20) DEFAULT 'technical' COMMENT '类型：technical/product/operation',
+    
+    -- 质量指标
+    quality_score DECIMAL(3,2) DEFAULT 5.00 COMMENT '质量评分 0-10',
+    usage_count INT DEFAULT 0 COMMENT '查阅次数',
+    helpful_count INT DEFAULT 0 COMMENT '点赞数',
+    
+    -- 关联
+    related_codes JSON COMMENT '相关经验code列表',
+    version INT DEFAULT 1 COMMENT '版本号',
+    language_code VARCHAR(10) DEFAULT 'zh' COMMENT '语言：zh/en',
+    
+    -- 协作
+    contributors JSON COMMENT '贡献者列表',
+    approved_by VARCHAR(100) COMMENT '审批人',
+    
+    -- 状态
+    status VARCHAR(20) DEFAULT 'published' COMMENT '状态：draft/published/archived',
+    visibility VARCHAR(20) DEFAULT 'shared' COMMENT '可见性：private/shared/global',
+    
+    -- 时间戳
+    created_at BIGINT NOT NULL COMMENT '创建时间戳(ms)',
+    updated_at BIGINT NOT NULL COMMENT '更新时间戳(ms)',
+    published_at BIGINT COMMENT '发布时间戳(ms)',
+    
+    -- 索引
+    INDEX idx_code (code),
+    INDEX idx_author (author_id),
+    INDEX idx_domain (domain),
+    INDEX idx_type (type),
+    INDEX idx_status (status),
+    INDEX idx_visibility (visibility),
+    INDEX idx_created (created_at DESC),
+    INDEX idx_usage (usage_count DESC),
+    INDEX idx_helpful (helpful_count DESC),
+    INDEX idx_importance (importance DESC),
+    FULLTEXT INDEX ft_title_summary (title, summary)
+    
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+COMMENT='经验表 - 存储云端共享的经验';
+
+
+-- ============================================
+-- 2. 记忆表 (memories)
+-- Agent 本地记忆，支持 private/shared/global
 -- ============================================
 
 DROP TABLE IF EXISTS memories;
 CREATE TABLE memories (
+    -- 唯一标识
     id VARCHAR(50) PRIMARY KEY COMMENT '记忆ID，格式: mem_xxxxxxxxxx',
+    
+    -- 核心内容
     content TEXT NOT NULL COMMENT '记忆内容',
     summary VARCHAR(500) COMMENT '摘要',
+    
+    -- MD 格式内容（可选，用于结构化记忆）
+    md_content MEDIUMTEXT COMMENT 'MD格式正文（可选）',
     
     -- 分类
     type ENUM('general', 'project', 'preference', 'knowledge', 'team') 
         NOT NULL DEFAULT 'general' COMMENT '记忆类型',
     visibility ENUM('private', 'shared', 'global') 
-        NOT NULL DEFAULT 'shared' COMMENT '可见性',
+        NOT NULL DEFAULT 'private' COMMENT '可见性',
     
     -- 来源
     source ENUM('cli', 'openclaw', 'claude_code', 'codex', 'kimi_code', 'cursor', 'other') 
-        NOT NULL DEFAULT 'cli' COMMENT '来源Agent类型',
+        NOT NULL DEFAULT 'openclaw' COMMENT '来源Agent类型',
     source_agent VARCHAR(100) COMMENT '来源Agent ID',
+    source_agent_name VARCHAR(100) COMMENT '来源Agent显示名',
     project_path VARCHAR(500) COMMENT '关联项目路径',
     
     -- 评分
     importance DECIMAL(3,1) DEFAULT 5.0 COMMENT '重要性 1-10',
     
-    -- 标签 (MySQL 5.7 用 VARCHAR 存储 JSON)
-    tags VARCHAR(1000) DEFAULT '{}' COMMENT '标签JSON ["tag1","tag2"]',
+    -- 标签
+    tags JSON COMMENT '标签列表 ["project","backend"]',
     
-    -- 时间戳 (毫秒)
+    -- 时间戳
     created_at BIGINT NOT NULL COMMENT '创建时间戳(ms)',
     updated_at BIGINT NOT NULL COMMENT '更新时间戳(ms)',
     
     -- 状态
     is_deleted TINYINT(1) DEFAULT 0 COMMENT '软删除标记',
     
-    -- 经验分享专用字段 (MySQL 5.7 用 VARCHAR 存储)
-    share_title VARCHAR(200) COMMENT '经验名称（唯一标题）',
-    md_content TEXT COMMENT 'MD格式正文（经验专用）',
-    notes VARCHAR(1000) COMMENT '备注（经验专用）',
+    -- 经验关联（如果这条记忆被分享为经验）
+    experience_code VARCHAR(50) COMMENT '关联的经验code',
     
     -- 索引
     INDEX idx_type (type),
     INDEX idx_visibility (visibility),
-    INDEX idx_project (project_path(255)),
     INDEX idx_source (source),
+    INDEX idx_source_agent (source_agent),
+    INDEX idx_project (project_path(255)),
     INDEX idx_created (created_at DESC),
+    INDEX idx_importance (importance DESC),
     INDEX idx_deleted (is_deleted),
-    INDEX idx_importance (importance),
-    INDEX idx_share_title (share_title)
+    INDEX idx_experience (experience_code),
+    FULLTEXT INDEX ft_content (content, summary)
     
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-COMMENT='共享记忆表';
+COMMENT='记忆表 - Agent本地记忆';
 
 
 -- ============================================
--- 2. Agent 注册表
+-- 3. Agent 注册表 (agents)
 -- ============================================
+
 DROP TABLE IF EXISTS agents;
 CREATE TABLE agents (
     id VARCHAR(100) PRIMARY KEY COMMENT 'Agent ID',
@@ -80,9 +160,8 @@ CREATE TABLE agents (
         NOT NULL COMMENT 'Agent类型',
     name VARCHAR(100) COMMENT '显示名称',
     description VARCHAR(500) COMMENT '描述',
-    api_key_hash VARCHAR(255) COMMENT 'API Key hash',
     version VARCHAR(50) COMMENT '版本',
-    capabilities VARCHAR(1000) DEFAULT '{}' COMMENT '能力JSON',
+    capabilities JSON DEFAULT '{}' COMMENT '能力JSON',
     status ENUM('active', 'inactive', 'disconnected') DEFAULT 'active' COMMENT '状态',
     registered_at BIGINT NOT NULL COMMENT '注册时间戳(ms)',
     last_seen BIGINT COMMENT '最后活跃时间戳(ms)',
@@ -96,8 +175,9 @@ COMMENT='Agent注册表';
 
 
 -- ============================================
--- 3. 访问控制表 (ACL)
+-- 4. 访问控制表 (acl)
 -- ============================================
+
 DROP TABLE IF EXISTS acl;
 CREATE TABLE acl (
     memory_id VARCHAR(50) NOT NULL COMMENT '记忆ID',
@@ -110,33 +190,16 @@ CREATE TABLE acl (
     
     PRIMARY KEY (memory_id, agent_id),
     INDEX idx_agent (agent_id),
-    INDEX idx_expires (expires_at),
+    INDEX idx_expires (expires_at)
     
-    FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 COMMENT='访问控制表';
 
 
 -- ============================================
--- 4. 向量缓存表
--- ============================================
-DROP TABLE IF EXISTS embeddings;
-CREATE TABLE embeddings (
-    content_hash VARCHAR(64) PRIMARY KEY COMMENT '内容SHA256哈希',
-    embedding LONGBLOB COMMENT '向量数据',
-    model VARCHAR(50) COMMENT '嵌入模型名称',
-    dimension INT COMMENT '向量维度',
-    created_at BIGINT COMMENT '创建时间戳(ms)',
-    
-    INDEX idx_model (model)
-    
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-COMMENT='向量缓存表';
-
-
--- ============================================
 -- 5. 搜索历史表
 -- ============================================
+
 DROP TABLE IF EXISTS search_history;
 CREATE TABLE search_history (
     id VARCHAR(50) PRIMARY KEY COMMENT '搜索ID',
@@ -144,76 +207,48 @@ CREATE TABLE search_history (
     agent_id VARCHAR(100) NOT NULL COMMENT '搜索者Agent ID',
     session_id VARCHAR(100) COMMENT '会话ID',
     results_count INT DEFAULT 0 COMMENT '返回结果数量',
-    results_ids VARCHAR(2000) DEFAULT '[]' COMMENT '返回的记忆ID列表(JSON)',
+    results_ids JSON COMMENT '返回的记忆/经验ID列表',
     latency_ms INT COMMENT '响应延迟(ms)',
     searched_at BIGINT NOT NULL COMMENT '搜索时间戳(ms)',
     
     INDEX idx_agent (agent_id),
     INDEX idx_session (session_id),
-    INDEX idx_searched (searched_at)
+    INDEX idx_searched (searched_at DESC)
     
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 COMMENT='搜索历史表';
 
 
 -- ============================================
--- 6. 访问日志表
+-- 6. 序列号表 (用于生成经验code)
 -- ============================================
-DROP TABLE IF EXISTS access_log;
-CREATE TABLE access_log (
-    id VARCHAR(50) PRIMARY KEY COMMENT '日志ID',
-    memory_id VARCHAR(50) COMMENT '记忆ID',
-    agent_id VARCHAR(100) NOT NULL COMMENT '操作者Agent ID',
-    action ENUM('read', 'write', 'delete', 'share', 'grant', 'revoke') NOT NULL COMMENT '操作类型',
-    details VARCHAR(1000) DEFAULT '{}' COMMENT '详细信息(JSON)',
-    ip_address VARCHAR(45) COMMENT 'IP地址',
-    user_agent VARCHAR(500) COMMENT 'User Agent',
-    accessed_at BIGINT NOT NULL COMMENT '操作时间戳(ms)',
+
+DROP TABLE IF EXISTS experience_sequences;
+CREATE TABLE experience_sequences (
+    domain VARCHAR(50) NOT NULL COMMENT '领域',
+    tag VARCHAR(50) NOT NULL COMMENT '标签',
+    current_seq INT DEFAULT 0 COMMENT '当前序号',
     
-    INDEX idx_agent (agent_id),
-    INDEX idx_memory (memory_id),
-    INDEX idx_action (action),
-    INDEX idx_accessed (accessed_at)
+    PRIMARY KEY (domain, tag)
     
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-COMMENT='访问日志表';
+COMMENT='经验序号表 - 用于生成唯一经验code';
 
 
 -- ============================================
--- 7. 角色表
+-- 7. 辅助函数
 -- ============================================
-DROP TABLE IF EXISTS agent_roles;
-CREATE TABLE agent_roles (
-    id VARCHAR(50) PRIMARY KEY COMMENT '角色ID',
-    agent_id VARCHAR(100) NOT NULL COMMENT 'Agent ID',
-    role_type ENUM('owner', 'admin', 'member', 'guest') DEFAULT 'member' COMMENT '角色类型',
-    project_path VARCHAR(500) COMMENT '项目路径(如果是项目级角色)',
-    created_at BIGINT NOT NULL COMMENT '创建时间戳(ms)',
-    updated_at BIGINT NOT NULL COMMENT '更新时间戳(ms)',
-    
-    UNIQUE KEY uk_agent_project (agent_id, project_path),
-    INDEX idx_role_type (role_type),
-    
-    FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-COMMENT='Agent角色表';
 
-
--- ============================================
--- 8. 辅助函数
--- ============================================
+DELIMITER //
 
 -- 获取当前时间戳 (毫秒)
-DELIMITER //
 CREATE FUNCTION IF NOT EXISTS current_timestamp_ms()
 RETURNS BIGINT
 BEGIN
     RETURN UNIX_TIMESTAMP() * 1000;
 END //
-DELIMITER ;
 
 -- 生成记忆ID
-DELIMITER //
 CREATE FUNCTION IF NOT EXISTS generate_memory_id()
 RETURNS VARCHAR(50)
 BEGIN
@@ -221,13 +256,31 @@ BEGIN
     SET hash_str = MD5(CONCAT(RAND(), NOW(6), UUID()));
     RETURN CONCAT('mem_', SUBSTRING(hash_str, 1, 10));
 END //
+
+-- 生成下一个经验序号
+CREATE FUNCTION IF NOT EXISTS next_experience_seq(p_domain VARCHAR(50), p_tag VARCHAR(50))
+RETURNS INT
+BEGIN
+    DECLARE next_seq INT;
+    
+    INSERT INTO experience_sequences (domain, tag, current_seq)
+    VALUES (p_domain, p_tag, 1)
+    ON DUPLICATE KEY UPDATE current_seq = current_seq + 1;
+    
+    SELECT current_seq INTO next_seq 
+    FROM experience_sequences 
+    WHERE domain = p_domain AND tag = p_tag;
+    
+    RETURN next_seq;
+END //
+
 DELIMITER ;
 
 
 -- ============================================
--- 初始化默认数据 (可选)
+-- 初始化数据
 -- ============================================
 
--- 创建默认 Agent (用于首次使用)
+-- 初始化默认 Agent（如果需要）
 -- INSERT INTO agents (id, type, name, registered_at) 
--- VALUES ('default', 'cli', 'Default CLI', current_timestamp_ms());
+-- VALUES ('default_openclaw', 'openclaw', 'Default OpenClaw', current_timestamp_ms());

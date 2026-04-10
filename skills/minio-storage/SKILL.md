@@ -1,6 +1,8 @@
 ---
 name: minio-storage
-description: 云端文件存储技能 - 使用 MinIO/S3 API 上传和下载经验文件，元数据写入 MySQL
+description: ⚠️ 已弃用 - 请使用 agent-memory 技能替代
+deprecated: true
+migration: 请迁移到 skills/agent-memory 使用纯 MySQL 存储
 ---
 
 # MinIO 云端存储技能
