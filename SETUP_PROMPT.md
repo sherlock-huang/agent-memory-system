@@ -6,12 +6,20 @@
 
 在 OpenClaw workspace 中执行：
 
+**Linux/macOS:**
 ```bash
 cd ~/.openclaw/workspace
 git clone https://github.com/sherlock-huang/agent-memory-system.git
 cd agent-memory-system
-./install.sh  # Linux/macOS
-install.bat   # Windows
+./install.sh
+```
+
+**Windows:**
+```cmd
+cd %USERPROFILE%\.openclaw\workspace
+git clone https://github.com/sherlock-huang/agent-memory-system.git
+cd agent-memory-system
+install.bat
 ```
 
 ### 2. 配置数据库连接
