@@ -432,6 +432,521 @@ class ExperienceClient:
         self._close()
 
 
+class ReviewClient:
+    """
+    审核客户端
+
+    用于：
+    - 请求审核（发起 review）
+    - 提交审核决定（批准/驳回/要求修改）
+    - 添加批注
+    - 查询审核状态
+    """
+
+    def __init__(self, config=None):
+        self.config = config or get_config()
+        self._connection: Optional[pymysql.Connection] = None
+
+    def _get_connection(self) -> pymysql.Connection:
+        """获取数据库连接"""
+        if not PYMYSQL_AVAILABLE:
+            raise DatabaseError("PyMySQL 未安装")
+        if self._connection is None or not self._connection.open:
+            try:
+                self._connection = pymysql.connect(
+                    host=self.config.host,
+                    port=self.config.port,
+                    database=self.config.database,
+                    user=self.config.user,
+                    password=self.config.password,
+                    charset=self.config.charset,
+                    cursorclass=DictCursor,
+                    connect_timeout=10,
+                    read_timeout=30,
+                    write_timeout=30,
+                )
+            except pymysql.Error as e:
+                raise DatabaseError(f"数据库连接失败: {e}")
+        return self._connection
+
+    def _close(self):
+        if self._connection and self._connection.open:
+            self._connection.close()
+            self._connection = None
+
+    def _generate_id(self, prefix: str) -> str:
+        return f"{prefix}_{uuid.uuid4().hex[:10]}"
+
+    def _now_ms(self) -> int:
+        return int(time.time() * 1000)
+
+    def _log_activity(
+        self,
+        conn,
+        actor_id: str,
+        action: str,
+        target_type: str,
+        target_id: str,
+        target_title: str = None,
+        detail: dict = None,
+    ):
+        """记录活动日志"""
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """INSERT INTO activity_log
+                   (id, actor_id, action, target_type, target_id, target_title, detail, created_at)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                (
+                    self._generate_id("log"),
+                    actor_id,
+                    action,
+                    target_type,
+                    target_id,
+                    target_title,
+                    json.dumps(detail or {}, ensure_ascii=False),
+                    self._now_ms(),
+                ),
+            )
+
+    def request_review(
+        self,
+        experience_code: str,
+        requester_id: str,
+        requester_name: str = None,
+        reviewer_id: str = None,
+        comment: str = None,
+        agent_id: str = "openclaw",
+    ) -> Dict[str, Any]:
+        """
+        请求审核（提交经验供审核）
+
+        Args:
+            experience_code: 经验代码
+            requester_id: 请求者Agent ID（作者）
+            requester_name: 请求者显示名
+            reviewer_id: 指定审核人ID（可选，默认由系统分配）
+            comment: 附言
+            agent_id: 当前操作用的Agent标识
+
+        Returns:
+            包含 review_id 和经验状态的字典
+        """
+        require_config()
+        conn = self._get_connection()
+        now = self._now_ms()
+        review_id = self._generate_id("rev")
+
+        with conn.cursor() as cursor:
+            # 获取经验信息
+            cursor.execute(
+                "SELECT id, title, author_id, status FROM experiences WHERE code = %s",
+                (experience_code,),
+            )
+            exp = cursor.fetchone()
+            if not exp:
+                raise DatabaseError(f"经验不存在: {experience_code}")
+
+            if exp["author_id"] == requester_id and reviewer_id is None:
+                raise DatabaseError("不能审核自己的经验（reviewer_id 不能与 author_id 相同）")
+
+            # 更新经验状态
+            cursor.execute(
+                """UPDATE experiences
+                   SET status = 'pending_review',
+                       reviewer_id = COALESCE(%s, reviewer_id),
+                       review_requested_at = %s
+                   WHERE code = %s""",
+                (reviewer_id, now, experience_code),
+            )
+
+            # 创建 review 记录
+            cursor.execute(
+                """INSERT INTO reviews
+                   (id, experience_code, experience_id, reviewer_id, reviewer_name,
+                    status, requester_id, comment, version_at_review, created_at, updated_at)
+                   VALUES (%s, %s, %s, %s, %s, 'requested', %s, %s, %s, %s, %s)""",
+                (
+                    review_id,
+                    experience_code,
+                    exp["id"],
+                    reviewer_id or "system",
+                    requester_name,
+                    requester_id,
+                    comment,
+                    1,
+                    now,
+                    now,
+                ),
+            )
+
+            # 活动日志
+            self._log_activity(
+                conn,
+                actor_id=requester_id,
+                action="review_requested",
+                target_type="experience",
+                target_id=experience_code,
+                target_title=exp["title"],
+                detail={"reviewer_id": reviewer_id, "comment": comment},
+            )
+
+            conn.commit()
+
+        return {
+            "review_id": review_id,
+            "experience_code": experience_code,
+            "status": "pending_review",
+            "reviewer_id": reviewer_id,
+            "created_at": now,
+        }
+
+    def submit_review(
+        self,
+        review_id: str,
+        reviewer_id: str,
+        decision: str,  # "approve" | "request_changes" | "reject"
+        comment: str = None,
+        agent_id: str = "openclaw",
+    ) -> Dict[str, Any]:
+        """
+        提交审核决定
+
+        Args:
+            review_id: Review ID
+            reviewer_id: 审核人ID
+            decision: 决定（approve / request_changes / reject）
+            comment: 审核意见
+
+        Returns:
+            包含审核结果的字典
+        """
+        require_config()
+        if decision not in ("approve", "request_changes", "reject"):
+            raise ValueError("decision 必须是 approve / request_changes / reject")
+
+        conn = self._get_connection()
+        now = self._now_ms()
+
+        with conn.cursor() as cursor:
+            # 获取 review 信息
+            cursor.execute(
+                "SELECT * FROM reviews WHERE id = %s AND status = 'requested' FOR UPDATE",
+                (review_id,),
+            )
+            review = cursor.fetchone()
+            if not review:
+                raise DatabaseError(f"Review 不存在或已完成: {review_id}")
+
+            # 权限检查：只有被指定的 reviewer 才能审核
+            if review["reviewer_id"] not in (reviewer_id, "system"):
+                raise DatabaseError(f"你不是该经验的指定审核人")
+
+            # 更新 review 记录
+            new_status = "approved" if decision == "approve" else "changes_requested"
+            cursor.execute(
+                """UPDATE reviews
+                   SET status = %s, decision = %s, comment = COALESCE(%s, comment),
+                       updated_at = %s, resolved_at = %s
+                   WHERE id = %s""",
+                (new_status, decision, comment, now, now, review_id),
+            )
+
+            # 更新经验状态
+            if decision == "approve":
+                exp_status = "published"
+            elif decision == "request_changes":
+                exp_status = "revision_requested"
+            else:
+                exp_status = "archived"
+
+            cursor.execute(
+                """UPDATE experiences
+                   SET status = %s, approved_by = %s, reviewed_at = %s,
+                       rejection_reason = %s
+                   WHERE code = %s""",
+                (
+                    exp_status,
+                    reviewer_id if decision == "approve" else None,
+                    now if decision != "approve" else None,
+                    comment if decision in ("request_changes", "reject") else None,
+                    review["experience_code"],
+                ),
+            )
+
+            # 活动日志
+            action_map = {
+                "approve": "review_approved",
+                "request_changes": "review_changes_requested",
+                "reject": "review_changes_requested",
+            }
+            cursor.execute(
+                "SELECT title FROM experiences WHERE code = %s",
+                (review["experience_code"],),
+            )
+            exp = cursor.fetchone()
+            self._log_activity(
+                conn,
+                actor_id=reviewer_id,
+                action=action_map[decision],
+                target_type="experience",
+                target_id=review["experience_code"],
+                target_title=exp["title"] if exp else None,
+                detail={"decision": decision, "comment": comment},
+            )
+
+            conn.commit()
+
+        return {
+            "review_id": review_id,
+            "decision": decision,
+            "status": new_status,
+            "experience_status": exp_status,
+            "resolved_at": now,
+        }
+
+    def add_comment(
+        self,
+        review_id: str,
+        author_id: str,
+        comment: str,
+        author_name: str = None,
+        line_number: int = None,
+        field_name: str = None,
+        severity: str = "suggestion",
+        agent_id: str = "openclaw",
+    ) -> Dict[str, Any]:
+        """
+        添加审核批注
+
+        Args:
+            review_id: Review ID
+            author_id: 批注作者ID
+            author_name: 批注作者显示名
+            comment: 批注内容
+            line_number: 行号（可选）
+            field_name: 字段名（可选）
+            severity: 严重程度 (suggestion/warning/error)
+
+        Returns:
+            批注记录
+        """
+        require_config()
+        conn = self._get_connection()
+        now = self._now_ms()
+        comment_id = self._generate_id("rcm")
+
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """INSERT INTO review_comments
+                   (id, review_id, line_number, field_name, comment, severity,
+                    author_id, author_name, created_at)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                (
+                    comment_id,
+                    review_id,
+                    line_number,
+                    field_name,
+                    comment,
+                    severity,
+                    author_id,
+                    author_name,
+                    now,
+                ),
+            )
+
+            # 更新 review 更新时间
+            cursor.execute(
+                "UPDATE reviews SET updated_at = %s WHERE id = %s",
+                (now, review_id),
+            )
+
+            # 活动日志
+            cursor.execute(
+                "SELECT experience_code FROM reviews WHERE id = %s",
+                (review_id,),
+            )
+            rev = cursor.fetchone()
+            self._log_activity(
+                conn,
+                actor_id=author_id,
+                action="review_commented",
+                target_type="review",
+                target_id=review_id,
+                target_title=f"批注 on {rev['experience_code']}" if rev else review_id,
+                detail={"line": line_number, "field": field_name, "severity": severity},
+            )
+
+            conn.commit()
+
+        return {
+            "id": comment_id,
+            "review_id": review_id,
+            "line_number": line_number,
+            "field_name": field_name,
+            "comment": comment,
+            "severity": severity,
+            "resolved": False,
+            "created_at": now,
+        }
+
+    def resolve_comment(
+        self,
+        comment_id: str,
+        resolved_by: str,
+        agent_id: str = "openclaw",
+    ) -> Dict[str, Any]:
+        """标记批注为已解决"""
+        require_config()
+        conn = self._get_connection()
+        now = self._now_ms()
+
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """UPDATE review_comments
+                   SET resolved = 1, resolved_by = %s, resolved_at = %s
+                   WHERE id = %s""",
+                (resolved_by, now, comment_id),
+            )
+            cursor.execute("SELECT review_id FROM review_comments WHERE id = %s", (comment_id,))
+            row = cursor.fetchone()
+            if row:
+                cursor.execute("UPDATE reviews SET updated_at = %s WHERE id = %s", (now, row["review_id"]))
+            conn.commit()
+
+        return {"comment_id": comment_id, "resolved": True, "resolved_at": now}
+
+    def get_review(self, review_id: str) -> Optional[Dict[str, Any]]:
+        """获取 Review 详情（含批注列表）"""
+        require_config()
+        conn = self._get_connection()
+
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT * FROM reviews WHERE id = %s", (review_id,))
+            review = cursor.fetchone()
+
+        if not review:
+            return None
+
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT * FROM review_comments WHERE review_id = %s ORDER BY created_at",
+                (review_id,),
+            )
+            comments = cursor.fetchall()
+
+        review["comments"] = comments
+        return review
+
+    def list_reviews(
+        self,
+        experience_code: str = None,
+        reviewer_id: str = None,
+        status: str = None,
+        requester_id: str = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> List[Dict[str, Any]]:
+        """列出 Review"""
+        require_config()
+        conn = self._get_connection()
+
+        sql = "SELECT * FROM reviews WHERE 1=1"
+        params = []
+
+        if experience_code:
+            sql += " AND experience_code = %s"
+            params.append(experience_code)
+        if reviewer_id:
+            sql += " AND reviewer_id = %s"
+            params.append(reviewer_id)
+        if status:
+            sql += " AND status = %s"
+            params.append(status)
+        if requester_id:
+            sql += " AND requester_id = %s"
+            params.append(requester_id)
+
+        sql += " ORDER BY created_at DESC LIMIT %s OFFSET %s"
+        params.extend([limit, offset])
+
+        with conn.cursor() as cursor:
+            cursor.execute(sql, params)
+            return cursor.fetchall()
+
+    def list_pending_for_reviewer(self, reviewer_id: str) -> List[Dict[str, Any]]:
+        """列出待我审核的经验（via 视图）"""
+        require_config()
+        conn = self._get_connection()
+
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """SELECT v.*, r.id AS review_id, r.status AS review_status,
+                          r.comment AS review_comment, r.created_at AS review_created_at
+                   FROM v_pending_reviews v
+                   JOIN reviews r ON v.code = r.experience_code AND r.status = 'requested'
+                   WHERE r.reviewer_id = %s
+                   ORDER BY r.created_at ASC""",
+                (reviewer_id,),
+            )
+            return cursor.fetchall()
+
+    def get_experience_with_reviews(self, code: str) -> Optional[Dict[str, Any]]:
+        """获取经验详情 + 所有相关 Review"""
+        exp = get_client("experience").get_experience(code)
+        if not exp:
+            return None
+        reviews = self.list_reviews(experience_code=code)
+        exp["reviews"] = reviews
+        return exp
+
+    def __del__(self):
+        self._close()
+
+
+# 全局客户端实例
+_review_client: Optional[ReviewClient] = None
+
+
+def get_review_client() -> ReviewClient:
+    global _review_client
+    if _review_client is None:
+        _review_client = ReviewClient()
+    return _review_client
+
+
+# 便捷函数
+def request_review(experience_code: str, requester_id: str, **kwargs) -> Dict[str, Any]:
+    return get_review_client().request_review(experience_code, requester_id, **kwargs)
+
+
+def submit_review(review_id: str, reviewer_id: str, decision: str, **kwargs) -> Dict[str, Any]:
+    return get_review_client().submit_review(review_id, reviewer_id, decision, **kwargs)
+
+
+def add_review_comment(review_id: str, author_id: str, comment: str, author_name: str = None, **kwargs) -> Dict[str, Any]:
+    return get_review_client().add_comment(review_id, author_id, comment, **kwargs)
+
+
+def resolve_review_comment(comment_id: str, resolved_by: str, **kwargs) -> Dict[str, Any]:
+    return get_review_client().resolve_comment(comment_id, resolved_by, **kwargs)
+
+
+def get_review(review_id: str) -> Optional[Dict[str, Any]]:
+    return get_review_client().get_review(review_id)
+
+
+def list_reviews(**kwargs) -> List[Dict[str, Any]]:
+    return get_review_client().list_reviews(**kwargs)
+
+
+def list_pending_reviews(reviewer_id: str) -> List[Dict[str, Any]]:
+    return get_review_client().list_pending_for_reviewer(reviewer_id)
+
+
+def get_experience_full(code: str) -> Optional[Dict[str, Any]]:
+    return get_review_client().get_experience_with_reviews(code)
+
+
 class MemoryClient:
     """
     记忆客户端
@@ -667,9 +1182,9 @@ def get_client(client_type: str = "experience") -> Any:
     获取客户端实例
     
     Args:
-        client_type: "experience" 或 "memory"
+        client_type: "experience" / "memory" / "review"
     """
-    global _experience_client, _memory_client
+    global _experience_client, _memory_client, _review_client
     
     if client_type == "experience":
         if _experience_client is None:
@@ -679,6 +1194,10 @@ def get_client(client_type: str = "experience") -> Any:
         if _memory_client is None:
             _memory_client = MemoryClient()
         return _memory_client
+    elif client_type == "review":
+        if _review_client is None:
+            _review_client = ReviewClient()
+        return _review_client
     else:
         raise ValueError(f"Unknown client type: {client_type}")
 

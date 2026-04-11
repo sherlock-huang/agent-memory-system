@@ -124,6 +124,9 @@ export MEMORY_DB_PASSWORD="YOUR_PASSWORD"
 
 ```bash
 mysql -h YOUR_MYSQL_HOST -P 3306 -u memory_user -p agent_memory < scripts/init_mysql.sql
+
+# 审核协作功能（首次安装或升级后运行）
+mysql -h YOUR_MYSQL_HOST -P 3306 -u memory_user -p agent_memory < scripts/migration_review.sql
 ```
 
 ## 使用方式
@@ -195,6 +198,43 @@ python -m skills.agent-memory.scripts.client get EXP-BACKEND-FASTAPI-0001
 python -m skills.agent-memory.scripts.client store "记忆内容" --type preference
 ```
 
+## 内容创作 Workflow
+
+本系统沉淀的经验库，可直接作为内容创作的素材来源。以下是配套的三平台创作 SOP：
+
+### 创作流程
+
+1. **选题触发**：从 `experiences` 中提取有价值的技术经验（如"FastAPI workers 配置优化"）
+2. **资料调研**：使用 Tavily Search 补充最新资料和权威参考
+3. **三平台并行创作**：同一选题，产出三份角度风格完全不同的内容
+
+### 三平台产出要求
+
+| 平台 | 格式要求 | 风格 |
+|------|----------|------|
+| **博客** | 中英文双版（`.mdx` + `en-.mdx`） | SEO/GEO 深度技术文 |
+| **小红书** | ≥5 张配图 + 口语化文案 | 种草向、场景化 |
+| **公众号** | HTML 格式 + 封面图 | 观点输出、结构化 |
+
+> 详细内容产出规范请参考 `docs/content-workflow.md`（如有）。
+
+### 经验库创作示例
+
+```bash
+# 1. 从经验库搜索有分享价值的技术经验
+python -m skills.agent-memory.scripts.client search "性能优化"
+
+# 2. 获取经验详情
+python -m skills.agent-memory.scripts.client get EXP-BACKEND-FASTAPI-0001
+
+# 3. 将创作成果回填经验库
+python -m skills.agent-memory.scripts.client share \
+  --title "FastAPI 性能优化最佳实践（含三平台内容）" \
+  --summary "workers=4 稳定，多平台验证" \
+  --tags fastapi,performance,content \
+  --domain BACKEND
+```
+
 ## 数据模型
 
 ### experiences
@@ -226,6 +266,52 @@ python -m skills.agent-memory.scripts.client store "记忆内容" --type prefere
 - `source_agent`：来源 Agent
 - `tags`：标签
 
+### reviews
+
+审核协作表，记录经验审核状态和批注。
+
+关键字段：
+
+- `experience_code`：被审核的经验 code
+- `reviewer_id`：审核人 Agent ID
+- `status`：审核状态（`requested` / `approved` / `changes_requested`）
+- `decision`：审核决定（`approve` / `request_changes` / `reject`）
+- `comment`：审核意见
+- `line_reviews`：逐行批注（JSON）
+
+### review_comments
+
+逐行/逐字段批注表。
+
+关键字段：
+
+- `review_id`：所属 Review ID
+- `line_number`：行号（针对特定行）
+- `field_name`：字段名（针对特定字段）
+- `comment`：批注内容
+- `severity`：`suggestion` / `warning` / `error`
+
+### activity_log
+
+操作审计日志，记录所有协作操作。
+
+关键字段：
+
+- `actor_id`：操作者 Agent ID
+- `action`：操作类型
+- `target_type`：目标类型
+- `target_id`：目标 ID
+
+## 经验生命周期
+
+```
+draft → pending_review → published
+                   ↘ revision_requested → (修改) → pending_review
+                                                    ↘ archived
+```
+
+所有经验必须经过审核才能变为 `published` 状态，禁止作者自己批准自己。
+
 ## 经验编码规则
 
 格式：
@@ -253,33 +339,37 @@ EXP-BACKEND-FASTAPI-0001
 
 这个项目可以作为更大系统里的记忆能力模块。
 
-例如：
+### Agent 协作触发词
 
-- `记住 xxx`
-  写入本地记忆
-- `分享经验`
-  写入共享经验库
-- `谁有 xxx 经验`
-  查询共享经验
-- `借鉴云端经验`
-  拉取共享经验用于当前任务
+| 触发词/动作 | 执行结果 |
+|------------|---------|
+| `记住 xxx` | 写入本地 `memories` 表 |
+| `分享经验` | 写入 `experiences` 表（draft）→ `request_review()` |
+| `谁有 xxx 经验` | `search_experiences()` 查询 |
+| `借鉴云端经验` | `get_experience()` 拉取内容 |
+| `请审核 <code>` | 创建 Review，另一 Agent 执行 `submit_review()` |
+| `批准 / 驳回` | 另一 Agent 调用 `submit_review(approve/reject)` |
+
+> 完整的双 Agent 协作 SOP 请参考 [AGENT_SOP.md](./AGENT_SOP.md)，两个 Hermes Agent 加载此文件即可实现：写 → 发审核 → 提意见 → 改 → 批准 → 发布的完整协作闭环。
 
 ## 项目结构
 
 ```text
 agent-memory-system/
 ├── scripts/
-│   └── init_mysql.sql
+│   ├── init_mysql.sql          # 初始数据库 Schema
+│   └── migration_review.sql    # Review 协作功能 Migration
 ├── skills/
 │   └── agent-memory/
-│       ├── SKILL.md
 │       └── scripts/
 │           ├── __init__.py
 │           ├── config.py
-│           └── client.py
+│           ├── client.py       # ExperienceClient / MemoryClient / ReviewClient
+│           └── review_cli.py   # 审核协作 CLI（request/submit/comment/pending）
 ├── src/
 │   ├── core/
 │   └── cli/
+├── AGENT_SOP.md               # 给另一个 Agent 的固化协作规范
 ├── config.yaml.example
 ├── install.bat
 ├── install.sh
