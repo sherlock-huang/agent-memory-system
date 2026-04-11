@@ -14,13 +14,12 @@ from typing import List, Dict, Any, Optional
 # 初始化路径（在任何 src.* import 之前执行）
 # ============================================================
 _script_dir = Path(__file__).resolve().parent
-_project_root = _script_dir.parent.parent.parent
-_src_path = _project_root / "src"
+_project_root = _script_dir.parent.parent.parent  # skills/content-review/scripts -> project root
 _config_path = _project_root / "config.yaml"
 
-# 确保 src 在 sys.path 最前面
-if str(_src_path) not in sys.path:
-    sys.path.insert(0, str(_src_path))
+# 确保项目根目录在 sys.path（这样才能 import src.core）
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
 
 
 def _init_db():
