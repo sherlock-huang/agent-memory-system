@@ -14,12 +14,12 @@ ALTER TABLE experiences
   ADD COLUMN review_requested_at BIGINT DEFAULT NULL COMMENT '请求审核时间戳(ms)' AFTER reviewer_id,
   ADD COLUMN reviewed_at BIGINT DEFAULT NULL COMMENT '审核完成时间戳(ms)' AFTER review_requested_at,
   ADD COLUMN rejection_reason TEXT DEFAULT NULL COMMENT '驳回原因' AFTER reviewed_at,
-  ADD COLUMN status ENUM('draft', 'pending_review', 'published', 'revision_requested', 'archived') 
-      DEFAULT 'draft' COMMENT '经验状态' AFTER status;
+  ADD COLUMN workflow_status ENUM('draft', 'pending_review', 'published', 'revision_requested', 'archived') 
+      DEFAULT 'draft' COMMENT '工作流状态' AFTER rejection_reason;
 
 -- 迁移已有数据：将 published 状态的设为 draft（避免状态冲突）
-UPDATE experiences SET status = 'draft' WHERE status = 'published';
-ALTER TABLE experiences MODIFY COLUMN status ENUM('draft', 'pending_review', 'published', 'revision_requested', 'archived') DEFAULT 'draft';
+UPDATE experiences SET workflow_status = 'draft' WHERE workflow_status = 'published';
+ALTER TABLE experiences MODIFY COLUMN workflow_status ENUM('draft', 'pending_review', 'published', 'revision_requested', 'archived') DEFAULT 'draft';
 
 -- ------------------------------------------------
 -- 2. 新建 reviews 表（核心审核表）
