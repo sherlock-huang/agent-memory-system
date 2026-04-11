@@ -159,17 +159,20 @@ class Config:
         return result
     
     def _merge_config(self, data: Dict[str, Any]):
-        """合并配置"""
+        """合并配置（深度合并）"""
         def merge(target: Dict, source: Dict):
             for key, value in source.items():
                 # 如果 value 是字符串，检查是否包含环境变量引用
                 if isinstance(value, str):
                     value = self._resolve_env_vars(value)
                 elif isinstance(value, dict):
-                    # 递归处理字典 - 确保 target[key] 存在
+                    # 递归处理字典
                     if key not in target:
                         target[key] = {}
-                    merge(target[key], value)
+                    if isinstance(target[key], dict):
+                        merge(target[key], value)
+                    else:
+                        target[key] = value
                     continue
                 
                 if key in target and isinstance(target[key], dict) and isinstance(value, dict):

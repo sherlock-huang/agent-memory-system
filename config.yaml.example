@@ -23,6 +23,7 @@
 # 数据库配置（MySQL）
 # 使用 ${ENV_VAR} 格式引用环境变量，支持默认值 ${ENV_VAR:-default}
 database:
+  type: "mysql"  # mysql / sqlite
   host: "${MEMORY_DB_HOST:-localhost}"
   port: "${MEMORY_DB_PORT:-3306}"
   database: "${MEMORY_DB_DATABASE:-agent_memory}"

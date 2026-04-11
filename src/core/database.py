@@ -37,10 +37,13 @@ class Database:
             if isinstance(db_cfg, dict):
                 db_type = db_cfg.get('type', 'sqlite')
                 if db_type == 'mysql':
+                    port = db_cfg.get('port', 3306)
+                    if isinstance(port, str):
+                        port = int(port)
                     return {
                         'type': 'mysql',
                         'host': db_cfg.get('host'),
-                        'port': db_cfg.get('port', 3306),
+                        'port': port,
                         'database': db_cfg.get('database'),
                         'user': db_cfg.get('user'),
                         'password': db_cfg.get('password'),
