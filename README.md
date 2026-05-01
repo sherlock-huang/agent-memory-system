@@ -66,7 +66,7 @@
 ### 1. 克隆项目
 
 ```bash
-git clone https://github.com/sherlock-huang/agent-memory-system.git
+git clone https://github.com/kunpeng-ai-lab/agent-memory-system.git
 cd agent-memory-system
 ```
 
@@ -429,8 +429,8 @@ pip install pymysql
 
 欢迎分享、引用与改进。
 
-- 发现问题：欢迎提交 [Issue](https://github.com/sherlock-huang/agent-memory-system/issues)
-- 有改进建议：欢迎提交 [Pull Request](https://github.com/sherlock-huang/agent-memory-system/pulls)
+- 发现问题：欢迎提交 [Issue](https://github.com/kunpeng-ai-lab/agent-memory-system/issues)
+- 有改进建议：欢迎提交 [Pull Request](https://github.com/kunpeng-ai-lab/agent-memory-system/pulls)
 
 ## 相关链接
 

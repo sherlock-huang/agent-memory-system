@@ -9,7 +9,7 @@
 **Linux/macOS:**
 ```bash
 cd ~/.openclaw/workspace
-git clone https://github.com/sherlock-huang/agent-memory-system.git
+git clone https://github.com/kunpeng-ai-lab/agent-memory-system.git
 cd agent-memory-system
 ./install.sh
 ```
@@ -17,7 +17,7 @@ cd agent-memory-system
 **Windows:**
 ```cmd
 cd %USERPROFILE%\.openclaw\workspace
-git clone https://github.com/sherlock-huang/agent-memory-system.git
+git clone https://github.com/kunpeng-ai-lab/agent-memory-system.git
 cd agent-memory-system
 install.bat
 ```
